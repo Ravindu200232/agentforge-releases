@@ -1,0 +1,84 @@
+name: Publish AgentForge for Mac
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: macos-15
+    timeout-minutes: 90
+
+    steps:
+      - name: Check out validated Mac source
+        uses: actions/checkout@v4
+        with:
+          repository: Ravindu200232/agentforge-studio
+          ref: e1c8c536c9adae80dc4242f6a2bd2365c3d0c4cf
+          path: source
+          persist-credentials: false
+
+      - name: Use Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Build signed app, DMG, and ZIP
+        working-directory: source
+        run: bash release/build-mac.sh
+
+      - name: Test staged backend and Studio
+        working-directory: source
+        env:
+          PYTHONPATH: .
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: |
+          PYTHON=release/stage/app/python/bin/python3
+          for module in test_database_panel.py test_supabase_connect.py test_cli_signin.py test_desktop_backend.py; do
+            "$PYTHON" -m unittest discover -s tests -p "$module"
+          done
+          node --test tests/test_*.mjs tests/studio/test_*.mjs
+
+      - name: Verify app and release files
+        working-directory: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(node -p "require('./desktop/package.json').version")"
+          ARCH="$(uname -m)"
+          test "$ARCH" = arm64
+          test "$VERSION" = 1.1.0
+          APP=release/out-mac/AgentForge.app
+          DMG="release/out-mac/AgentForge-${VERSION}-mac-${ARCH}.dmg"
+          ZIP="release/out-mac/AgentForge-${VERSION}-mac-${ARCH}.zip"
+          codesign --verify --deep --strict --verbose=4 "$APP"
+          hdiutil verify "$DMG"
+          unzip -tq "$ZIP"
+          shasum -a 256 "$DMG" "$ZIP" > release/out-mac/SHA256SUMS.txt
+
+      - name: Publish separate Mac release
+        working-directory: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG=v1.1.0-mac
+          DMG=release/out-mac/AgentForge-1.1.0-mac-arm64.dmg
+          ZIP=release/out-mac/AgentForge-1.1.0-mac-arm64.zip
+          SHA=release/out-mac/SHA256SUMS.txt
+          cp release/mac-release-notes.md release/out-mac/RELEASE_NOTES.md
+          printf '\nSource: https://github.com/Ravindu200232/agentforge-studio/commit/e1c8c536c9adae80dc4242f6a2bd2365c3d0c4cf\n' >> release/out-mac/RELEASE_NOTES.md
+          printf 'Validated workflow: https://github.com/Ravindu200232/agentforge-studio/actions/runs/38351850640\n' >> release/out-mac/RELEASE_NOTES.md
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$DMG" "$ZIP" "$SHA" --clobber
+            gh release edit "$TAG" --notes-file release/out-mac/RELEASE_NOTES.md
+          else
+            gh release create "$TAG" "$DMG" "$ZIP" "$SHA" \
+              --title 'AgentForge 1.1.0 for Mac (Apple Silicon)' \
+              --notes-file release/out-mac/RELEASE_NOTES.md \
+              --target main --latest=false
+          fi
