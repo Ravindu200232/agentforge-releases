@@ -16,7 +16,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: Ravindu200232/agentforge-studio
-          ref: 6187e55bc998ce64aa654fc6a59ab4d20da7687f
+          ref: 747860c4f2fb4a5bd158f38bf19abf7f16ea2c31
           path: source
           persist-credentials: false
 
@@ -71,7 +71,7 @@ jobs:
           ZIP=release/out-mac/AgentForge-1.1.0-mac-arm64.zip
           SHA=release/out-mac/SHA256SUMS.txt
           cp release/mac-release-notes.md release/out-mac/RELEASE_NOTES.md
-          printf '\nSource: https://github.com/Ravindu200232/agentforge-studio/commit/6187e55bc998ce64aa654fc6a59ab4d20da7687f\n' >> release/out-mac/RELEASE_NOTES.md
+          printf '\nSource: https://github.com/Ravindu200232/agentforge-studio/commit/747860c4f2fb4a5bd158f38bf19abf7f16ea2c31\n' >> release/out-mac/RELEASE_NOTES.md
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" "$DMG" "$ZIP" "$SHA" --clobber
             gh release edit "$TAG" --notes-file release/out-mac/RELEASE_NOTES.md
