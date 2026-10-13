@@ -1,0 +1,91 @@
+name: Windows desktop release
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Exact AgentForge Studio source commit
+        required: true
+        type: string
+      asset_name:
+        description: New Windows ZIP asset name
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    steps:
+      - name: Check out release workflow
+        uses: actions/checkout@v4
+
+      - name: Check out exact Studio source
+        uses: actions/checkout@v4
+        with:
+          repository: Ravindu200232/agentforge-studio
+          ref: ${{ inputs.source_ref }}
+          path: source
+          persist-credentials: false
+
+      - name: Use Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Use Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Build Windows app and ZIP
+        shell: pwsh
+        run: |
+          py -3.12 -c 'import sys; print(sys.version)'
+          if ($LASTEXITCODE -ne 0) { throw 'Python 3.12 launcher is missing' }
+          npm ci --prefix source/studio
+          if ($LASTEXITCODE -ne 0) { throw 'Studio dependencies failed' }
+          npm ci --prefix source/desktop
+          if ($LASTEXITCODE -ne 0) { throw 'Desktop dependencies failed' }
+          & ./source/release/build.ps1 -Phase ui,stage,python,package,zip
+          if ($LASTEXITCODE -ne 0) { throw 'Windows package build failed' }
+
+      - name: Verify package and publish release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ASSET_NAME: ${{ inputs.asset_name }}
+        run: |
+          if ($env:ASSET_NAME -notmatch '^AgentForge-[A-Za-z0-9.-]+-win-x64\.zip$') { throw 'Invalid asset name' }
+          $zip = 'source/release/out/AgentForge-1.0.0-win-x64.zip'
+          python -c 'import sys,zipfile; z=zipfile.ZipFile(sys.argv[1]); assert z.testzip() is None; assert len(z.namelist()) > 40000' $zip
+          if ($LASTEXITCODE -ne 0) { throw 'ZIP verification failed' }
+          & './source/desktop/dist/win-unpacked/resources/app/python/python.exe' -c 'import spacy,thinc.backends.numpy_ops,presidio_analyzer,presidio_anonymizer'
+          if ($LASTEXITCODE -ne 0) { throw 'Packaged privacy filter failed' }
+          $asset = Join-Path 'source/release/out' $env:ASSET_NAME
+          Move-Item -LiteralPath $zip -Destination $asset
+          $hash = (Get-FileHash -Algorithm SHA256 $asset).Hash.ToLower()
+          gh release upload v1 $asset -R $env:GITHUB_REPOSITORY --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'Release upload failed' }
+          $remote = (gh release view v1 -R $env:GITHUB_REPOSITORY --json assets | ConvertFrom-Json).assets |
+            Where-Object name -eq $env:ASSET_NAME
+          if (@($remote).Count -ne 1 -or $remote.digest -ne "sha256:$hash" -or $remote.size -ne (Get-Item $asset).Length) {
+            throw 'Uploaded asset hash or size does not match'
+          }
+          $manifestDir = Join-Path $env:RUNNER_TEMP 'agentforge-manifest'
+          New-Item -ItemType Directory -Force $manifestDir | Out-Null
+          gh release download v1 -R $env:GITHUB_REPOSITORY -p manifest.json -D $manifestDir --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'Could not download current installer manifest' }
+          $manifestPath = Join-Path $manifestDir 'manifest.json'
+          $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
+          $app = @($manifest.components | Where-Object id -eq 'app')
+          if ($app.Count -ne 1) { throw 'Manifest must contain exactly one app' }
+          $app[0].url = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/v1/$env:ASSET_NAME"
+          $app[0].sha256 = $hash
+          $app[0].size = (Get-Item $asset).Length
+          $manifest.built = (Get-Date).ToString('s')
+          [IO.File]::WriteAllText($manifestPath, ($manifest | ConvertTo-Json -Depth 10), [Text.UTF8Encoding]::new($false))
+          gh release upload v1 $manifestPath -R $env:GITHUB_REPOSITORY --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'Manifest upload failed' }
