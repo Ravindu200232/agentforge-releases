@@ -16,7 +16,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: Ravindu200232/agentforge-studio
-          ref: 2ff9ac4d2d3b9af05c09b68700ab7b2dce3e9061
+          ref: 532e8c45cfc1a482ca8f6aff594af12beb397155
           path: source
           persist-credentials: false
 
@@ -38,10 +38,11 @@ jobs:
           PYTHONDONTWRITEBYTECODE: '1'
         run: |
           PYTHON=release/stage/app/python/bin/python3
-          for module in test_database_panel.py test_supabase_connect.py test_cli_signin.py test_desktop_backend.py; do
+          for module in test_database_panel.py test_supabase_connect.py test_cli_signin.py test_desktop_backend.py test_accounts.py test_session_retry.py test_llm_tools.py; do
             "$PYTHON" -m unittest discover -s tests -p "$module"
           done
           node --test tests/test_*.mjs tests/studio/test_*.mjs
+          node --test engine-proxy/test/meter.test.mjs
 
       - name: Verify app and release files
         working-directory: source
@@ -73,7 +74,7 @@ jobs:
           ZIP=release/out-mac/AgentForge-1.1.0-mac-arm64.zip
           SHA=release/out-mac/SHA256SUMS.txt
           cp release/mac-release-notes.md release/out-mac/RELEASE_NOTES.md
-          printf '\nSource: https://github.com/Ravindu200232/agentforge-studio/commit/2ff9ac4d2d3b9af05c09b68700ab7b2dce3e9061\n' >> release/out-mac/RELEASE_NOTES.md
+          printf '\nSource: https://github.com/Ravindu200232/agentforge-studio/commit/532e8c45cfc1a482ca8f6aff594af12beb397155\n' >> release/out-mac/RELEASE_NOTES.md
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" "$DMG" "$ZIP" "$SHA" --clobber
             gh release edit "$TAG" --notes-file release/out-mac/RELEASE_NOTES.md
